@@ -36,6 +36,6 @@ tomli==2.0.1
 typeguard==2.13.3
 types-toml==0.10.8
 typing_extensions==4.4.0
-urllib3==1.26.12
+urllib3==1.26.18
 Werkzeug==2.2.3
 xmltodict==0.13.0
