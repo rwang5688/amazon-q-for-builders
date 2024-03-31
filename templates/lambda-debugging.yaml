@@ -1,0 +1,131 @@
+Description: Create a Lambda function for debugging lab.
+
+Resources:
+
+  DataExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'
+
+
+  DataAnalysisBucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: Retain
+
+  DataAnalysisFunc:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: data-analysis-function
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import pandas
+          import boto3
+
+          S3_BUCKET = os.environ["S3_BUCKET"]
+          S3_OBJECT = os.environ["S3_OBJECT"]
+
+          def lambda_handler(event, context):
+              # download csv file from s3
+              s3 = boto3.client("s3")
+              s3.download_file(S3_BUCKET, S3_OBJECT, "/tmp/data.csv")
+              df = pandass.read_csv("/tmp/data.csv")
+
+              # Get count of dataframe
+              count = len(df)
+
+              # return head count
+              return {"statusCode": 200, "body": json.dumps({"count": count})}
+      Description: Return number of items in dataframe
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt DataExecutionRole.Arn
+      Runtime: python3.11
+      Timeout: 30
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref DataAnalysisBucket
+ # Upload Data to S3 Bucket
+
+  S3PopulateCustomResource:
+    Type: Custom::IdentityCenter
+    Properties:
+      ServiceToken: !GetAtt DataUploadFunction.Arn
+
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess'
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws:iam::aws:policy/IAMFullAccess'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/AmazonSageMakerFullAccess'
+
+  DataUploadFunction:
+     Type: "AWS::Lambda::Function"
+     Properties:
+       Description: "Uploads Data"
+       FunctionName: "data_upload_function"
+       Environment:
+         Variables:
+            DataBucket:  !Ref DataAnalysisBucket
+       Handler: index.handler
+       Role: !GetAtt LambdaExecutionRole.Arn
+       Timeout: 360
+       Runtime: python3.11
+       Code:
+         ZipFile: |
+          import boto3
+          import os
+          import cfnresponse
+          from urllib.request import urlopen
+          from io import BytesIO
+          def handler(event, context):
+              s3 = boto3.client('s3')
+              response_data = {}
+              bucket_name = os.environ['DataBucket']
+              s3_key = 'clickstream_data.csv'
+              try:
+                  csv_url = 'https://raw.githubusercontent.com/build-on-aws/next-gen-workshop-data-playground/main/data/sample_click_stream_data.csv'
+
+                  with urlopen(csv_url) as response:
+                      csv_file_data = response.read()
+                      s3.upload_fileobj(BytesIO(csv_file_data), bucket_name, s3_key)
+         
+                  print("Operation successful!")
+                  cfnresponse.send(event,
+                                   context,
+                                   cfnresponse.SUCCESS,
+                                   response_data)
+              except Exception as e:
+                  print("Operation failed...")
+                  print(str(e))
+                  response_data['Data'] = str(e)
+                  cfnresponse.send(event,
+                                   context,
+                                   cfnresponse.FAILED,
+                                   response_data)
